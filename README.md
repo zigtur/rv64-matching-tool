@@ -17,11 +17,22 @@ Finally, the tool prints out the number of `UNKNOWN` instruction and the number 
 
 ## Limits
 
+### Instructions parsing
+
 This tool is an instruction parser. As RISCV64 instructions can be closed one to the other,
 the tool may not be able to detect small discrepancies.
 
 For example, based on the `supported_targets/asterisc-v1.1.2.json`, the tool is not yet able to differentiate
 `FLW` and `FLD` instructions.
+
+### Machine definition
+
+The machine definition is defined in the JSON file. It details all the instructions that the machine is able to support.
+
+The unsupported instructions must not be included in the machine definition.
+
+Note that this definition requires detailing instruction fields such as opcode, funct3, ...
+
 
 ## Install
 
