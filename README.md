@@ -33,6 +33,9 @@ The unsupported instructions must not be included in the machine definition.
 
 Note that this definition requires detailing instruction fields such as opcode, funct3, ...
 
+### ELF section
+
+The tool only parses the `.text` section of the ELF RISCV64 binary. Potential executable instructions in other sections are not parsed.
 
 ## Install
 
