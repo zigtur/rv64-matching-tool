@@ -12,6 +12,8 @@ The tool parses the opcode of an instruction and then some of the subfields (suc
 When an instruction is found in the binary but is not in the JSON file, the number of `UNKNOWN` instruction is incremented
 and the instruction is collected.
 
+Moreover, the tool now supports detecting Linux syscalls.
+
 Finally, the tool prints out the number of `UNKNOWN` instruction and the number of occurences for each of them.
 
 
@@ -36,6 +38,15 @@ Note that this definition requires detailing instruction fields such as opcode, 
 ### ELF section
 
 The tool only parses the `.text` section of the ELF RISCV64 binary. Potential executable instructions in other sections are not parsed.
+
+## Syscalls detection
+
+The tool supports detecting some syscalls. When an `ECALL` instruction is detected, the tool navigates through the **5 previous instructions** to find if the value of the `a7` register was set to an immediate.
+The `a7` register holds the syscall identifier.
+
+Why **5 previous instructions**? This is an arbitrary value, determined by reverse-engineering a RISCV-64 binary.
+
+If no value for `a7` register is found or if the `a7` value is not recognized as supported, the tool will trigger an alert.
 
 ## Install
 
