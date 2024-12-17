@@ -12,5 +12,6 @@ Despite having an handler for the following instructions, the Asteric v1.1.2 tar
 - "53": "FADD"
 
 
+Multiple syscalls are implemented. The Asterisc JSON file defines only 3 of them: read, write and exit.
 
 

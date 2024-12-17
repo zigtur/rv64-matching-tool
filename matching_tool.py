@@ -34,7 +34,6 @@ def extract_text_section_instructions(elf_path):
             # Divide the text section data into 32-bit (4-byte) RISC-V instructions
             instructions = []
             for i in range(0, len(text_data), 4):
-                # Extract a 32-bit instruction (since RISC-V instructions are 32-bit)
                 instruction_bytes = text_data[i:i + 4]
                 if len(instruction_bytes) < 4:
                     break  # If the remaining bytes are less than 4, stop
@@ -50,27 +49,40 @@ def extract_text_section_instructions(elf_path):
         print(f"Error: Unable to read the ELF file. Reason: {e}")
         exit(1)
     
+def parse_rd(instr):
+    return (instr >> 7) & 0x1F
+
+def parse_imm_i(instr):
+    return (instr >> 20) & 0xFFF
+
+def parse_imm_u(instr):
+    return instr & 0xFFFFF000
+
+def parse_rs1(instr):
+    return (instr >> 15) & 0x1F
 
 def parse_funct3(instr):
-    # Corresponds to parsing in VM
     return (instr >> 12) & 0x7
 
 def parse_funct7(instr):
-    # Corresponds to parsing in VM
     return (instr >> 25)
 
+def parse_funct12(instr):
+    return (instr >> 20) & 0xFFF
+
 def parse_opcode(instr):
-    # Corresponds to parsing in VM
     return instr & 0x7F
 
 def instruction_name(instruction, supported):
     opcode = parse_opcode(instruction)
     funct3 = parse_funct3(instruction)
     funct7 = parse_funct7(instruction)
+    funct12 = parse_funct12(instruction)
     
     opcode_hex = f"{opcode:02X}"
     funct3_hex = f"{funct3:02X}"
     funct7_hex = f"{funct7:02X}"
+    funct12_hex = f"{funct12:04X}"
     
     for opcode_entry in supported['opcodes']:
         if opcode_hex in opcode_entry:
@@ -84,7 +96,16 @@ def instruction_name(instruction, supported):
             if 'funct3' in opcode_data:
                 for funct3_entry in opcode_data['funct3']:
                     if funct3_hex in funct3_entry:
-                        return funct3_entry[funct3_hex]
+                        funct3_data = funct3_entry[funct3_hex]
+                        
+                        # Check for funct12 (for ECALL, EBREAK, etc.)
+                        if 'funct12' in funct3_data:
+                            for funct12_entry in funct3_data['funct12']:
+                                if funct12_hex in funct12_entry:
+                                    funct12_data = funct12_entry[funct12_hex]
+                                    return funct12_data
+                                    
+                        return funct3_data
 
             # Check for funct7-based instructions
             if 'funct7' in opcode_data:
@@ -105,48 +126,64 @@ def instruction_name(instruction, supported):
     return "UNKNOWN"
 
 def parse_instructions(instructions, json_path):
-    """
-    Parse each RISC-V instruction from the input instructions.
-    
-    Args:
-    - instructions: Array of instructions.
-
-    Returns:
-    - instructions_count: a dictionary that maps each instruction with its number of occurence.
-    - unknown_instructions: a dictionary mapping unknown instruction with its number of occurence.
-    """    
     last_bytes = {}
+    unknown_syscalls = {}
     unknown_instructions = {}
-    supported = dict_from_json(json_path)
+    supported, syscall_map = dict_from_json(json_path)
 
     u32max = (2**32)-1
-    for instruction in instructions:
-        if instruction < u32max:  # Ensure it is a full 32-bit instruction
+    for index, instruction in enumerate(instructions):
+        if instruction < u32max:
             ins_name = instruction_name(instruction, supported)
-            # Increment the count of this opcode in the dictionary
+            if ins_name == "ECALL":
+                ins_name = parse_syscall(instructions, index, syscall_map)
+                if "UNKNOWN" in ins_name:
+                    unknown_syscalls[ins_name] = unknown_syscalls.get(ins_name,  0) +1
             if ins_name == "UNKNOWN":
                 unknown_instructions[instruction] = unknown_instructions.get(instruction, 0) + 1
             last_bytes[ins_name] = last_bytes.get(ins_name, 0) + 1
         else:
             print(f"Error: Unexpected instruction: {instruction}.")
             exit(1)
-            
+    return last_bytes, unknown_instructions, unknown_syscalls
 
-    return last_bytes, unknown_instructions
+def find_a7_value(instructions, index):
+    # parse the 5 previous instructions, looking for A7 value
+    for i in range(max(0,index-5), index):
+        instr = instructions[i]
+        rd = parse_rd(instr)
+        if rd == 17:  # a7 = x17
+            opcode = parse_opcode(instr)
+            if opcode == 0x13:  # ADDI
+                imm = parse_imm_i(instr)
+                return imm
+            elif opcode == 0x37:  # LUI
+                imm = parse_imm_u(instr) >> 12
+                return imm
+            elif opcode == 0x13 and parse_rs1(instr) == 0:  # LI (ADDI x17, x0, imm)
+                imm = parse_imm_i(instr)
+                return imm
+    return None
+
+def parse_syscall(instructions, index, syscall_map):
+    a7 = find_a7_value(instructions, index)
+    if a7 == None:
+        return "UNKNOWN_SYSCALL (a7 = UNKNOWN)"
+    syscall_name = syscall_map.get(f"{a7:02X}")
+    if syscall_map.get(f"{a7:02X}") is None:
+        return f"UNKNOWN_SYSCALL (a7 = 0x{a7:X})"
+    return f"ECALL.{syscall_name}"
+    
 
 def dict_from_json(json_path):
     try:
         with open(json_path, 'r') as f:
-            supported = json.load(f)
-            return supported
-
-    except FileNotFoundError:
-        print(f"Error: File '{elf_path}' not found.")
-        exit(1)
+            data = json.load(f)
+            syscalls = {list(s.keys())[0]: list(s.values())[0] for s in data.get('syscalls', [])}
+            return data, syscalls
     except Exception as e:
         print(f"Error: Unable to read the JSON file. Reason: {e}")
         exit(1)
-
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
@@ -157,12 +194,16 @@ if __name__ == "__main__":
     json_path = sys.argv[2]
     instructions = extract_text_section_instructions(elf_path)
     
-    instruction_counts, unknown = parse_instructions(instructions, json_path)
+    instruction_counts, unknown_instr, unknown_syscalls = parse_instructions(instructions, json_path)
+    
+    # SYSCALL results
+    for key in unknown_syscalls.keys():
+        print(f"There were {unknown_syscalls[key]} {key}.")
 
     if instruction_counts.get("UNKNOWN", 0) != 0:
         nb_unknown = instruction_counts["UNKNOWN"]
         print(f"There were {nb_unknown} unknown instructions.\n")
-        for instru, count in sorted(unknown.items()):
+        for instru, count in sorted(unknown_instr.items()):
             print(f"Unknown instruction: {instru:08X}: {count} times")
         exit(1)
     else:
