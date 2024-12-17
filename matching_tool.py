@@ -3,6 +3,10 @@ from elftools.elf.elffile import ELFFile
 import re
 import json
 
+# Lookback 5 instructions before the ECALL
+SYSCALL_INSTRUCTIONS_LOOKBACK = 5
+
+
 def extract_text_section_instructions(elf_path):
     """
     Extract and print executable instructions from the .text section of a RISC-V ELF binary.
@@ -149,7 +153,7 @@ def parse_instructions(instructions, json_path):
 
 def find_a7_value(instructions, index):
     # parse the 5 previous instructions, looking for A7 value
-    for i in range(max(0,index-5), index):
+    for i in range(max(0,index-SYSCALL_INSTRUCTIONS_LOOKBACK), index):
         instr = instructions[i]
         rd = parse_rd(instr)
         if rd == 17:  # a7 = x17
